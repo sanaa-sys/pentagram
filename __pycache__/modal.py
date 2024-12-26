@@ -12,7 +12,7 @@ def download_model():
     AutoPipelineForText2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=torch.float16, variant="fp16")
 
     image = modal.Image.debian_slim().pip_install("fastapi(standard)","diffusers", "transformers", "accelerate","requests").run_function(download_model)
-    app = modal.app("sd-demo", image = image, secrets=[modal.Secret.from_name("huggingface-secret")])
+    app = modal.app("sd-demo", image = image, secrets=[modal.Secret.from_name("custom-secret")])
     @app.cls(image = image, gpu = "A100")
     class Model:
         @modal.build()
@@ -22,11 +22,11 @@ def download_model():
               import torch
               self.pipe = AutoPipelineForText2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=torch.float16, variant="fp16")
               self.pipe.to("cuda")
-              self.api_key = os.environ.get("huggingface-secret")
+              self.api_key = os.environ.get("MODAL_API_KEY")
 
         @modal.web_endpoint()
         def generate(self, request: Request, prompt: str = Query(..., description = "The image description prompt")):
-            api_key = request.headers.get("huggingface-secret")
+            api_key = request.headers.get("MODAL_API_KEY")
             if api_key != self.api_key:
                 raise HTTPException(status_code=401, detail="Unauthorized")
            

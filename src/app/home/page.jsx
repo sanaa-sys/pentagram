@@ -1,122 +1,161 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
-import { auth, db } from "@/lib/firebase";
-import { ImageCard } from '@/components/ImageCard';
-import { useRouter } from 'next/navigation';
+import { useRef, useState } from "react";
+import Together from "together-ai";
+import { Button } from "@/components/ui/button";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { motion } from "framer-motion";
+import { Separator } from "@/components/ui/separator";
+import { DownloadIcon } from "@radix-ui/react-icons";
 
-export default function Home() {
-    const [inputText, setInputText] = useState("");
+function Home() {
+    const [input, setInput] = useState("");
+    const [imageUrl, setImageUrl] = useState("");
+    const [ratio, setRatio] = useState("9:16");
     const [isLoading, setIsLoading] = useState(false);
-    const [images, setImages] = useState([]);
-    const [lastGeneratedImage, setLastGeneratedImage] = useState(null);
-    const [error, setError] = useState(null);
-    const [user, setUser] = useState(null);
-    const router = useRouter();
+    const [downloading, setDownloading] = useState(false);
+    const imageRef = useRef(null);
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            if (currentUser) {
-                setUser(currentUser);
-            }
-        });
+    const hRatio = ratio.split(":").map(Number)[0];
+    const vRatio = ratio.split(":").map(Number)[1];
 
-        return () => unsubscribe();
-    }, [user]);
+    const width = hRatio === 1 ? 512 : hRatio * 64;
+    const height = vRatio === 1 ? 512 : vRatio * 64;
 
-    useEffect(() => {
-        if (user) {
-            const q = query(
-                collection(db, 'images'),
-                where('userId', '==', user.uid)
-            );
+    const together = new Together({
+        apiKey: process.env.NEXT_PUBLIC_TOGETHER_API_KEY,
+    });
 
-            const unsubscribe = onSnapshot(q, (querySnapshot) => {
-                const imageList = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-                setImages(imageList);
-            });
-
-            return () => unsubscribe();
-        }
-    }, [user]);
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!user) return;
-
+    const handleGenerateImage = async () => {
         setIsLoading(true);
-        setError(null);
 
         try {
-            const response = await fetch("/api/generate-image", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: inputText, userId: user.uid }),
+            console.log(width, height);
+            const response = await together.images.create({
+                model: "black-forest-labs/FLUX.1-schnell-Free",
+                prompt: input,
+                width: width,
+                height: height,
+                response_format: "b64_json",
             });
 
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || "An error occurred while generating the image.");
-            }
-
-            setInputText("");
-            setLastGeneratedImage(data.imageId);
+            const base64Image = response.data[0].b64_json;
+            const dataUrl = `data:image/png;base64,${base64Image}`;
+            setImageUrl(dataUrl);
         } catch (error) {
             console.error("Error generating image:", error);
-            setError(error.message || "An error occurred. Please try again.");
+            // You might want to add some error handling UI here
         } finally {
             setIsLoading(false);
         }
     };
 
-    if (!user) return null;
+    const handleDownloadImage = () => {
+        if (imageUrl) {
+            const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = 'generated-image.png';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    };
 
     return (
-        <div className="min-h-screen flex flex-col justify-between p-8">
-            <main className="flex-1 mb-8">
-                <h1 className="text-3xl font-bold mb-6">Your Generated Images</h1>
-                {error && <p className="text-red-500 mb-4">{error}</p>}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {images.map((image) => (
-                        <ImageCard
-                            key={image.id}
-                            id={image.id}
-                            imageData={image.imageData}
-                            prompt={image.prompt}
-                            likes={image.likes}
-                            comments={image.comments}
-                            userId={image.userId}
-                            createdAt={image.createdAt.toDate()}
-                        />
-                    ))}
-                </div>
-            </main>
+        <div className="bg-gradient-to-br from-gray-100 via-gray-200 to-gray-300 p-10 md:p-8">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="max-w-7xl mx-auto bg-white/80 backdrop-blur-sm rounded-3xl shadow-2xl overflow-y-auto"
+            >
+                <div className="flex flex-col md:flex-row h-[calc(100vh-4rem)]">
+                    <div className="w-full md:w-1/2 p-6 flex flex-col">
+                        <h2 className="text-3xl font-bold mb-6 text-gray-800 bg-clip-text text-transparent bg-gradient-to-r from-gray-700 to-black">
+                            AI Image Generator
+                        </h2>
+                        <div className="flex-grow flex flex-col justify-center">
+                            <Textarea
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                placeholder="Describe the image you want to create..."
+                                className="mb-4 resize-none rounded-2xl border-2 border-gray-300 focus:border-gray-500 transition-colors"
+                                rows={5}
+                            />
+                            <div className="flex items-center space-x-4 mb-6">
+                                <Select value={ratio} onValueChange={setRatio}>
+                                    <SelectTrigger className="w-full rounded-full border-2 border-gray-300 focus:border-gray-500 transition-colors">
+                                        <SelectValue placeholder="Select ratio" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="1:1">1:1</SelectItem>
+                                        <SelectItem value="4:3">4:3</SelectItem>
+                                        <SelectItem value="16:9">16:9</SelectItem>
+                                        <SelectItem value="3:4">3:4</SelectItem>
+                                        <SelectItem value="9:16">9:16</SelectItem>
+                                    </SelectContent>
+                                </Select>
 
-            <footer className="w-full max-w-3xl mx-auto">
-                <form onSubmit={handleSubmit} className="w-full">
-                    <div className="flex gap-2">
-                        <input
-                            type="text"
-                            value={inputText}
-                            onChange={(e) => setInputText(e.target.value)}
-                            className="flex-1 p-3 rounded-lg bg-black/[.05] dark:bg-white/[.06] border border-black/[.08] dark:border-white/[.145] focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                            placeholder="Describe the image you want to generate..."
-                            disabled={isLoading}
-                        />
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className="px-6 py-3 rounded-lg bg-foreground text-background hover:bg-[#383838] dark:hover:bg-[#ccc] transition-colors disabled:opacity-50"
-                        >
-                            {isLoading ? "Generating..." : "Generate"}
-                        </button>
+                                <Button
+                                    onClick={handleGenerateImage}
+                                    disabled={isLoading}
+                                    className="flex-shrink-0 bg-gradient-to-r from-gray-700 to-black hover:from-gray-800 hover:to-gray-900 text-white font-semibold py-2 px-4 rounded-full transition-all duration-300 ease-in-out transform hover:scale-105"
+                                >
+                                    {isLoading ? "Generating..." : "Generate Image"}
+                                </Button>
+                            </div>
+                        </div>
                     </div>
-                </form>
-            </footer>
+                    <Separator orientation="vertical" className="hidden md:block" />
+                    <div className="w-full md:w-1/2 p-6 bg-gray-50/50 flex flex-col">
+                        <h2 className="text-3xl font-bold mb-6 text-gray-800 bg-clip-text text-transparent bg-gradient-to-r from-gray-700 to-black">
+                            Generated Image
+                        </h2>
+                        {imageUrl ? (
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                transition={{ duration: 0.5 }}
+                                className="flex-grow flex flex-col items-center justify-center"
+                            >
+                                <img
+                                    ref={imageRef}
+                                    src={imageUrl}
+                                    alt="Generated"
+                                    className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg mb-6"
+                                />
+                                <div className="flex space-x-4">
+                                    <Button
+                                        onClick={handleDownloadImage}
+                                        className="rounded-full bg-gradient-to-r from-gray-700 to-black hover:from-gray-800 hover:to-gray-900 text-white font-semibold py-2 px-4 transition-all duration-300 ease-in-out transform hover:scale-105 flex items-center space-x-2"
+                                    >
+                                        {downloading ? "Downloading..." : <DownloadIcon />}
+                                        <span>Download</span>
+                                    </Button>
+                                </div>
+                            </motion.div>
+                        ) : (
+                            <div className="flex-grow flex items-center justify-center text-gray-400">
+                                <p className="text-lg italic">
+                                    Your generated image will appear here
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </motion.div>
         </div>
     );
 }
+
+export default Home;
+    
+
 
